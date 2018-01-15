@@ -1,8 +1,6 @@
 /*
- * Copyright (C) 2014      Artem Polyakov <artpol84@gmail.com>
- * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
- *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      Mellanox Technologies Ltd. All rights reserved.
+ * Copyright (c) 2017      Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -13,408 +11,235 @@
 #ifndef PMIX_UTIL_TIMING_H
 #define PMIX_UTIL_TIMING_H
 
-#include <src/include/pmix_config.h>
+#if (PMIX_ENABLE_TIMING)
 
-
-#include "src/class/pmix_list.h"
-
-#if PMIX_ENABLE_TIMING
-
-#define PMIX_TIMING_DESCR_MAX 1024
-#define PMIX_TIMING_BUFSIZE 32
-#define PMIX_TIMING_OUTBUF_SIZE (10*1024)
+typedef double (*pmix_timing_ts_func_t)(void);
 
 typedef enum {
-    PMIX_TIMING_TRACE,
-    PMIX_TIMING_INTDESCR,
-    PMIX_TIMING_INTBEGIN,
-    PMIX_TIMING_INTEND
-} pmix_event_type_t;
+    PMIX_TIMING_AUTOMATIC_TIMER,
+    PMIX_TIMING_GET_TIME_OF_DAY,
+    PMIX_TIMING_CYCLE_NATIVE,
+    PMIX_TIMING_USEC_NATIVE
+} pmix_timer_type_t;
+
+#define PMIX_TIMING_STR_LEN 256
 
 typedef struct {
-    pmix_list_item_t super;
-    int fib;
-    pmix_event_type_t type;
-    const char *func;
-    const char *file;
-    int line;
-    double ts, ts_ovh;
-    char descr[PMIX_TIMING_DESCR_MAX];
-    int id;
-} pmix_timing_event_t;
+    char desc[PMIX_TIMING_STR_LEN];
+    double ts;
+    char *file;
+    char *prefix;
+}   pmix_timing_val_t;
 
-typedef double (*get_ts_t)(void);
+typedef struct {
+    pmix_timing_val_t *val;
+    int use;
+    struct pmix_timing_list_t *next;
+} pmix_timing_list_t;
 
-typedef struct pmix_timing_t
-{
-    int next_id_cntr;
-    // not thread safe!
-    // The whole implementation is not thread safe now
-    // since it is supposed to be used in service
-    // thread only. Fix in the future or now?
-    int current_id;
-    pmix_list_t *events;
-    pmix_timing_event_t *buffer;
-    size_t buffer_offset, buffer_size;
-    get_ts_t get_ts;
+typedef struct pmix_timing_t {
+    double ts;
+    const char *prefix;
+    int size;
+    int cnt;
+    int error;
+    int enabled;
+    pmix_timing_ts_func_t get_ts;
+    pmix_timing_list_t *timing;
+    pmix_timing_list_t *cur_timing;
 } pmix_timing_t;
 
-typedef struct {
-    pmix_timing_t *t;
-    pmix_timing_event_t *ev;
-    int errcode;
-} pmix_timing_prep_t;
+#define PMIX_TIMING_INIT(_size)                                                \
+    pmix_timing_t PMIX_TIMING;                                                 \
+    PMIX_TIMING.prefix = __func__;                                             \
+    PMIX_TIMING.size = _size;                                                  \
+    PMIX_TIMING.get_ts = pmix_timing_ts_func(PMIX_TIMING_AUTOMATIC_TIMER);     \
+    PMIX_TIMING.cnt = 0;                                                       \
+    PMIX_TIMING.error = 0;                                                     \
+    PMIX_TIMING.ts = PMIX_TIMING.get_ts();                                     \
+    PMIX_TIMING.enabled = 0;                                                   \
+    {                                                                          \
+        char *ptr;                                                             \
+        ptr = getenv("PMIX_TIMING_ENABLE");                                    \
+        if (NULL != ptr) {                                                     \
+            PMIX_TIMING.enabled = atoi(ptr);                                   \
+        }                                                                      \
+        if (PMIX_TIMING.enabled) {                                             \
+            setenv("PMIX_TIMING_ENABLE", "1", 1);                              \
+            PMIX_TIMING.timing = (pmix_timing_list_t*)malloc(sizeof(pmix_timing_list_t));              \
+            memset(PMIX_TIMING.timing, 0, sizeof(pmix_timing_list_t));         \
+            PMIX_TIMING.timing->val = (pmix_timing_val_t*)malloc(sizeof(pmix_timing_val_t) * _size);   \
+            PMIX_TIMING.cur_timing = PMIX_TIMING.timing;                       \
+        }                                                                      \
+    }
 
-/* Pass down our namespace and rank for pretty-print purposes */
-PMIX_EXPORT void pmix_init_id(char* nspace, int rank);
+#define PMIX_TIMING_ITEM_EXTEND                                                    \
+    do {                                                                           \
+        if (PMIX_TIMING.enabled) {                                                 \
+            PMIX_TIMING.cur_timing->next = (struct pmix_timing_list_t*)malloc(sizeof(pmix_timing_list_t)); \
+            PMIX_TIMING.cur_timing = (pmix_timing_list_t*)PMIX_TIMING.cur_timing->next;                    \
+            memset(PMIX_TIMING.cur_timing, 0, sizeof(pmix_timing_list_t));                                 \
+            PMIX_TIMING.cur_timing->val = malloc(sizeof(pmix_timing_val_t) * PMIX_TIMING.size);            \
+        }                                                                          \
+    } while(0)
 
-/**
- * Initialize timing structure.
- *
- * @param t pointer to the timing handler structure
- */
-PMIX_EXPORT void pmix_timing_init(pmix_timing_t *t);
+#define PMIX_TIMING_FINALIZE                                                       \
+    do {                                                                           \
+        if (PMIX_TIMING.enabled) {                                                 \
+            pmix_timing_list_t *t = PMIX_TIMING.timing, *tmp;                      \
+            while ( NULL != t) {                                                   \
+                tmp = t;                                                           \
+                t = (pmix_timing_list_t*)t->next;                                  \
+                free(tmp->val);                                                    \
+                free(tmp);                                                         \
+            }                                                                      \
+            PMIX_TIMING.timing = NULL;                                             \
+            PMIX_TIMING.cur_timing = NULL;                                         \
+            PMIX_TIMING.cnt = 0;                                                   \
+        }                                                                          \
+    } while(0)
 
-/**
- * Prepare timing event, do all printf-like processing.
- * Should not be directly used - for service purposes only.
- *
- * @param t pointer to the timing handler structure
- * @param fmt printf-like format
- * @param ... other parameters that should be converted to string representation
- *
- * @retval partly filled pmix_timing_prep_t structure
-  */
-PMIX_EXPORT pmix_timing_prep_t pmix_timing_prep_ev(pmix_timing_t *t, const char *fmt, ...);
+#define PMIX_TIMING_NEXT(...)                                                      \
+    do {                                                                           \
+        if (!PMIX_TIMING.error && PMIX_TIMING.enabled) {                           \
+            char *f = strrchr(__FILE__, '/') + 1;                                  \
+            int len = 0;                                                           \
+            if (PMIX_TIMING.cur_timing->use >= PMIX_TIMING.size){                  \
+                PMIX_TIMING_ITEM_EXTEND;                                           \
+            }                                                                      \
+            len = snprintf(PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].desc,        \
+                PMIX_TIMING_STR_LEN, ##__VA_ARGS__);                               \
+            if (len >= PMIX_TIMING_STR_LEN) {                                      \
+                PMIX_TIMING.error = 1;                                             \
+            }                                                                      \
+            PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].file = strdup(f);     \
+            PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].prefix = strdup(__func__);      \
+            PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use++].ts =        \
+                PMIX_TIMING.get_ts() - PMIX_TIMING.ts;                             \
+            PMIX_TIMING.cnt++;                                                     \
+            PMIX_TIMING.ts = PMIX_TIMING.get_ts();                                 \
+        }                                                                          \
+    } while(0)
 
-/**
- * Prepare timing event, ignore printf-like processing.
- * Should not be directly used - for service purposes only.
- *
- * @param t pointer to the timing handler structure
- * @param fmt printf-like format
- * @param ... other parameters that should be converted to string representation
- *
- * @retval partly filled pmix_timing_prep_t structure
-  */
-PMIX_EXPORT pmix_timing_prep_t pmix_timing_prep_ev_end(pmix_timing_t *t, const char *fmt, ...);
+#define PMIX_TIMING_APPEND(filename,func,desc,ts)                                  \
+    do {                                                                           \
+        if (PMIX_TIMING.cur_timing->use >= PMIX_TIMING.size){                      \
+            PMIX_TIMING_ITEM_EXTEND;                                               \
+        }                                                                          \
+        int len = snprintf(PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].desc,        \
+            PMIX_TIMING_STR_LEN, "%s", desc);                                      \
+        if (len >= PMIX_TIMING_STR_LEN) {                                          \
+            PMIX_TIMING.error = 1;                                                 \
+        }                                                                          \
+        PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].prefix = func;    \
+        PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use].file = filename;  \
+        PMIX_TIMING.cur_timing->val[PMIX_TIMING.cur_timing->use++].ts = ts;        \
+        PMIX_TIMING.cnt++;                                                         \
+    } while(0)
 
-/**
- * Enqueue timing event into the list of events in handler 't'.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval
- */
-PMIX_EXPORT void pmix_timing_add_step(pmix_timing_prep_t p, const char *func,
-                                      const char *file, int line);
+#define PMIX_TIMING_IMPORT_PMIX_PREFIX(_prefix, func)                              \
+    do {                                                                           \
+        if (!PMIX_TIMING.error && PMIX_TIMING.enabled) {                           \
+            int cnt;                                                               \
+            int i;                                                                 \
+            double ts;                                                             \
+            PMIX_TIMING_ENV_CNT(func, cnt);                                        \
+            PMIX_TIMING_ENV_ERROR_PREFIX(_prefix, func, PMIX_TIMING.error);        \
+            for(i = 0; i < cnt; i++){                                              \
+                char *desc, *filename;                                             \
+                PMIX_TIMING_ENV_GETDESC_PREFIX(_prefix, &filename, func, i, &desc, ts);  \
+                PMIX_TIMING_APPEND(filename, func, desc, ts);                      \
+            }                                                                      \
+        }                                                                          \
+    } while(0)
 
-/**
- * Enqueue the description of the interval into a list of events
- * in handler 't'.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval id of event interval
- */
-PMIX_EXPORT int pmix_timing_descr(pmix_timing_prep_t p, const char *func,
-                                  const char *file, int line);
+#define PMIX_TIMING_IMPORT_OPAL(func)                                              \
+        PMIX_TIMING_IMPORT_PMIX_PREFIX("", func);
 
-/**
- * Enqueue the beginning of timing interval that already has the
- * description and assigned id into the list of events
- * in handler 't'.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval
- */
-PMIX_EXPORT void pmix_timing_start_id(pmix_timing_t *t, int id, const char *func,
-                                      const char *file, int line);
-
-/**
- * Enqueue the end of timing interval that already has
- * description and assigned id into the list of events
- * in handler 't'.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval
- */
-PMIX_EXPORT void pmix_timing_end(pmix_timing_t *t, int id, const char *func,
-                                 const char *file, int line );
-
-/**
- * Enqueue both description and start of timing interval
- * into the list of events and assign its id.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval interval id
- */
-static inline int pmix_timing_start_init(pmix_timing_prep_t p,
-                                         const char *func,
-                                         const char *file, int line)
-{
-    int id = pmix_timing_descr(p, func, file, line);
-    if( id < 0 )
-        return id;
-    pmix_timing_start_id(p.t, id, func, file, line);
-    return id;
-}
-
-/**
- * The wrapper that is used to stop last measurement in PMIX_TIMING_MNEXT.
- *
- * @param p result of pmix_timing_prep_ev
- * @param func function name where event occurs
- * @param file file name where event occurs
- * @param line line number in the file
- *
- * @retval interval id
- */
-PMIX_EXPORT void pmix_timing_end_prep(pmix_timing_prep_t p,
-                                      const char *func, const char *file, int line);
-
-/**
- * Report all events that were enqueued in the timing handler 't'.
- * - if fname == NULL the output will be done using pmix_output and
- * each line will be prefixed with "prefix" to ease grep'ing.
- * - otherwise the corresponding file will be used for output in "append" mode
- * WARRNING: not all filesystems provide enough support for that feature, some records may
- * disappear.
- *
- * @param t timing handler
- * @param account_overhead consider malloc overhead introduced by timing code
- * @param prefix prefix to use when no fname was specifyed to ease grep'ing
- * @param fname name of the output file (may be NULL)
- *
- * @retval PMIX_SUCCESS On success
- * @retval PMIX_ERROR or PMIX_ERR_OUT_OF_RESOURCE On failure
- */
-PMIX_EXPORT pmix_status_t pmix_timing_report(pmix_timing_t *t, char *fname);
-
-/**
- * Report all intervals that were enqueued in the timing handler 't'.
- * - if fname == NULL the output will be done using pmix_output and
- * each line will be prefixed with "prefix" to ease grep'ing.
- * - otherwise the corresponding file will be used for output in "append" mode
- * WARRNING: not all filesystems provide enough support for that feature, some records may
- * disappear.
- *
- * @param t timing handler
- * @param account_overhead consider malloc overhead introduced by timing code
-  * @param fname name of the output file (may be NULL)
- *
- * @retval PMIX_SUCCESS On success
- * @retval PMIX_ERROR or PMIX_ERR_OUT_OF_RESOURCE On failure
- */
-PMIX_EXPORT pmix_status_t pmix_timing_deltas(pmix_timing_t *t, char *fname);
-
-/**
- * Release all memory allocated for the timing handler 't'.
- *
- * @param t timing handler
- *
- * @retval
- */
-PMIX_EXPORT void pmix_timing_release(pmix_timing_t *t);
-
-/**
- * Macro for passing down process id - compiled out
- * when configured without --enable-timing
- */
-#define PMIX_TIMING_ID(n, r) pmix_timing_id((n), (r));
-
-/**
- * Main macro for use in declaring pmix timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- */
-#define PMIX_TIMING_DECLARE(t) pmix_timing_t t;   /* need semicolon here to avoid warnings when not enabled */
-
-/**
- * Main macro for use in declaring external pmix timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- */
-#define PMIX_TIMING_DECLARE_EXT(x, t) x extern pmix_timing_t t;  /* need semicolon here to avoid warnings when not enabled */
-
-/**
- * Main macro for use in initializing pmix timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_init()
- */
-#define PMIX_TIMING_INIT(t) pmix_timing_init(t)
-
-/**
- * Macro that enqueues event with its description to the specified
- * timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_add_step()
- */
-#define PMIX_TIMING_EVENT(x) pmix_timing_add_step( pmix_timing_prep_ev x, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MDESCR: Measurement DESCRiption
- * Introduce new timing measurement with string description for the specified
- * timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_descr()
- */
-#define PMIX_TIMING_MDESCR(x) pmix_timing_descr( pmix_timing_prep_ev x, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MSTART_ID: Measurement START by ID.
- * Marks the beginning of the measurement with ID=id on the
- * specified timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_start_id()
- */
-#define PMIX_TIMING_MSTART_ID(t, id) pmix_timing_start_id(t, id, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MSTART: Measurement START
- * Introduce new timing measurement conjuncted with its start
- * on the specifyed timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_start_init()
- */
-#define PMIX_TIMING_MSTART(x) pmix_timing_start_init( pmix_timing_prep_ev x, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MSTOP: STOP Measurement
- * Finishes the most recent measurement on the specifyed timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_end()
- */
-#define PMIX_TIMING_MSTOP(t) pmix_timing_end(t, -1, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MSTOP_ID: STOP Measurement with ID=id.
- * Finishes the measurement with give ID on the specifyed timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_end()
- */
-#define PMIX_TIMING_MSTOP_ID(t, id) pmix_timing_end(t, id, __FUNCTION__, __FILE__, __LINE__)
-
-/**
- * MNEXT: start NEXT Measurement
- * Convinient macro, may be implemented with the sequence of three previously
- * defined macroses:
- * - finish current measurement (PMIX_TIMING_MSTOP);
- * - introduce new timing measurement (PMIX_TIMING_MDESCR);
- * - starts next measurement (PMIX_TIMING_MSTART_ID)
- * on the specifyed timing handler;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_start_init()
- */
-#define PMIX_TIMING_MNEXT(x) ( \
-    pmix_timing_end_prep(pmix_timing_prep_ev_end x,             \
-                            __FUNCTION__, __FILE__, __LINE__ ), \
-    pmix_timing_start_init( pmix_timing_prep_ev x,              \
-                            __FUNCTION__, __FILE__, __LINE__)   \
-)
-
-/**
- * The macro for use in reporting collected events with absolute values;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @param enable flag that enables/disables reporting. Used for fine-grained timing.
- * @see pmix_timing_report()
- */
-#define PMIX_TIMING_REPORT(enable, t) { \
-    if( enable ) { \
-        pmix_timing_report(t, pmix_timing_output); \
-    } \
-}
-
-/**
- * The macro for use in reporting collected events with relative times;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @param enable flag that enables/disables reporting. Used for fine-grained timing.
- * @see pmix_timing_deltas()
- */
-#define PMIX_TIMING_DELTAS(enable, t) { \
-    if( enable ) { \
-        pmix_timing_deltas(t, pmix_timing_output); \
-    } \
-}
-
-/**
- * Main macro for use in releasing allocated resources;
- * will be "compiled out" when PMIX is configured without
- * --enable-timing.
- *
- * @see pmix_timing_release()
- */
-#define PMIX_TIMING_RELEASE(t) pmix_timing_release(t)
+#define PMIX_TIMING_OUT                                                           \
+    do {                                                                          \
+        if (PMIX_TIMING.enabled) {                                                \
+            int i, size, rank;                                                    \
+            MPI_Comm_size(MPI_COMM_WORLD, &size);                                 \
+            MPI_Comm_rank(MPI_COMM_WORLD, &rank);                                 \
+            int error = 0;                                                        \
+                                                                                  \
+            MPI_Reduce(&PMIX_TIMING.error, &error, 1,                             \
+                MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);                             \
+                                                                                  \
+            if (error) {                                                          \
+                if (0 == rank) {                                                  \
+                    printf("==PMIX_TIMING== error: something went wrong, timings doesn't work\n"); \
+                }                                                                 \
+            }                                                                     \
+            else {                                                                \
+                double *avg = (double*)malloc(sizeof(double) * PMIX_TIMING.cnt);  \
+                double *min = (double*)malloc(sizeof(double) * PMIX_TIMING.cnt);  \
+                double *max = (double*)malloc(sizeof(double) * PMIX_TIMING.cnt);  \
+                char **desc = (char**)malloc(sizeof(char*) * PMIX_TIMING.cnt);    \
+                char **prefix = (char**)malloc(sizeof(char*) * PMIX_TIMING.cnt);  \
+                char **file = (char**)malloc(sizeof(char*) * PMIX_TIMING.cnt);    \
+                                                                                  \
+                if( PMIX_TIMING.cnt > 0 ) {                                       \
+                    PMIX_TIMING.ts = PMIX_TIMING.get_ts();                        \
+                    pmix_timing_list_t *timing = PMIX_TIMING.timing;              \
+                    i = 0;                                                        \
+                    do {                                                          \
+                        int use;                                                  \
+                        for (use = 0; use < timing->use; use++) {                 \
+                            MPI_Reduce(&timing->val[use].ts, avg + i, 1,          \
+                                MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);          \
+                            MPI_Reduce(&timing->val[use].ts, min + i, 1,          \
+                                MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);          \
+                            MPI_Reduce(&timing->val[use].ts, max + i, 1,          \
+                                MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);          \
+                            desc[i] = timing->val[use].desc;                      \
+                            prefix[i] = timing->val[use].prefix;                  \
+                            file[i] = timing->val[use].file;                      \
+                            i++;                                                  \
+                        }                                                         \
+                        timing = (pmix_timing_list_t*)timing->next;               \
+                    } while (timing != NULL);                                     \
+                                                                                  \
+                    if( 0 == rank ){                                              \
+                        if (PMIX_TIMING.timing->next) {                           \
+                            printf("==PMIX_TIMING== warning: added the extra timings allocation that might misrepresent the results.\n"            \
+                                   "==PMIX_TIMING==          Increase the inited size of timings to avoid extra allocation during runtime.\n");    \
+                        }                                                         \
+                                                                                  \
+                        printf("------------------ %s ------------------\n",      \
+                                PMIX_TIMING.prefix);                              \
+                        for(i=0; i< PMIX_TIMING.cnt; i++){                        \
+                            avg[i] /= size;                                       \
+                            printf("[%s:%s:%s]: %lf / %lf / %lf\n",               \
+                                file[i], prefix[i], desc[i], avg[i], min[i], max[i]); \
+                        }                                                         \
+                        printf("[%s:overhead]: %lf \n", PMIX_TIMING.prefix,       \
+                                PMIX_TIMING.get_ts() - PMIX_TIMING.ts);           \
+                    }                                                             \
+                }                                                                 \
+                free(avg);                                                        \
+                free(min);                                                        \
+                free(max);                                                        \
+                free(desc);                                                       \
+                free(prefix);                                                     \
+                free(file);                                                       \
+            }                                                                     \
+        }                                                                         \
+    } while(0)
 
 #else
+#define PMIX_TIMING_INIT(size)
 
-#define PMIX_TIMING_ID(n, r)
+#define PMIX_TIMING_NEXT(...)
 
-#define PMIX_TIMING_DECLARE(t)
+#define PMIX_TIMING_APPEND(desc,ts)
 
-#define PMIX_TIMING_DECLARE_EXT(x, t)
+#define PMIX_TIMING_OUT
 
-#define PMIX_TIMING_INIT(t)
+#define PMIX_TIMING_IMPORT_OPAL(func)
 
-#define PMIX_TIMING_EVENT(x)
-
-#define PMIX_TIMING_MDESCR(x)
-
-#define PMIX_TIMING_MSTART_ID(t, id)
-
-#define PMIX_TIMING_MSTART(x)
-
-#define PMIX_TIMING_MSTOP(t)
-
-#define PMIX_TIMING_MSTOP_ID(t, id)
-
-#define PMIX_TIMING_MNEXT(x)
-
-#define PMIX_TIMING_REPORT(enable, t)
-
-#define PMIX_TIMING_DELTAS(enable, t)
-
-#define PMIX_TIMING_RELEASE(t)
+#define PMIX_TIMING_FINALIZE
 
 #endif
 

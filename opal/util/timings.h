@@ -67,7 +67,7 @@ opal_timing_ts_func_t opal_timing_ts_func(opal_timer_type_t type);
             (_nm)->enabled = atoi(ptr);                                           \
         }                                                                         \
         (_nm)->cntr = 0;                                                          \
-        ptr = getenv((_nm)->id);                                                  \
+        ptr = getenv((_nm)->cntr_env);                                            \
         if( NULL != ptr ){                                                        \
             (_nm)->cntr = atoi(ptr);                                              \
         }                                                                         \

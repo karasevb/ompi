@@ -258,7 +258,7 @@ int orte_rmaps_base_get_target_nodes(opal_list_t *allocated_nodes, orte_std_cntr
             if (NULL == (node = (orte_node_t*)opal_pointer_array_get_item(orte_node_pool, i))) {
                 continue;
             }
-            OPAL_LIST_FOREACH(nptr, nodes, orte_node_t) {
+            OPAL_LIST_FOREACH(nptr, &nodes, orte_node_t) {
                 nptr = (orte_node_t*)item;
                 if (0 != strcmp(node->name, nptr->name)) {
                     OPAL_OUTPUT_VERBOSE((10, orte_rmaps_base_framework.framework_output,

@@ -513,6 +513,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
     OMPI_TIMING_NEXT("rte_init");
     OMPI_TIMING_IMPORT_OPAL("orte_ess_base_app_setup");
     OMPI_TIMING_IMPORT_OPAL("rte_init");
+    OMPI_TIMING_IMPORT_OPAL("orte_ess_base_proc_binding");
 
     ompi_rte_initialized = true;
 

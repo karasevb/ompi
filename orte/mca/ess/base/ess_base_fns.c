@@ -39,6 +39,7 @@
 #include "orte/util/name_fns.h"
 #include "orte/util/proc_info.h"
 #include "orte/util/show_help.h"
+#include "opal/util/timings.h"
 #include "orte/runtime/orte_globals.h"
 
 #include "orte/mca/ess/base/base.h"
@@ -54,6 +55,8 @@ int orte_ess_base_proc_binding(void)
     int ret;
     char *error=NULL;
     hwloc_cpuset_t mycpus;
+
+    OPAL_TIMING_ENV_INIT(proc_binding);
 
     /* Determine if we were pre-bound or not - this also indicates
      * that we were launched via mpirun, bound or not */
@@ -98,11 +101,15 @@ int orte_ess_base_proc_binding(void)
         /* the topology system will pickup the binding pattern */
     }
 
+    OPAL_TIMING_ENV_NEXT(proc_binding, "check if bound");
+
     /* load the topology as we will likely need it */
     if (OPAL_SUCCESS != opal_hwloc_base_get_topology()) {
         /* there is nothing we can do, so just return */
         return ORTE_SUCCESS;
     }
+
+    OPAL_TIMING_ENV_NEXT(proc_binding, "get_topology()");
 
     /* see if we were bound when launched */
     if (!orte_proc_is_bound) {
@@ -285,6 +292,8 @@ int orte_ess_base_proc_binding(void)
                              ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
     }
 
+    OPAL_TIMING_ENV_NEXT(proc_binding, "bind");
+
  MOVEON:
     /* get the cpus we are bound to */
     mycpus = hwloc_bitmap_alloc();
@@ -324,6 +333,9 @@ int orte_ess_base_proc_binding(void)
         OPAL_MODEX_SEND_VALUE(ret, OPAL_PMIX_GLOBAL, OPAL_PMIX_CPUSET,
                               orte_process_info.cpuset, OPAL_STRING);
     }
+
+    OPAL_TIMING_ENV_NEXT(proc_binding, "done");
+
     return ORTE_SUCCESS;
 
  error:

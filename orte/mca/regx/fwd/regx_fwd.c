@@ -180,19 +180,17 @@ static int nidmap_create(opal_pointer_array_t *pool, char **regex)
                 range->vpid = nodenum;
                 range->cnt = 1;
                 opal_list_append(&ndreg->ranges, &range->super);
-                break;
-            }
             /* see if the node number is out of sequence */
-            if (nodenum != (range->vpid + range->cnt)) {
+            } else if (nodenum != (range->vpid + range->cnt)) {
                 /* start a new range */
                 range = OBJ_NEW(orte_regex_range_t);
                 range->vpid = nodenum;
                 range->cnt = 1;
                 opal_list_append(&ndreg->ranges, &range->super);
-                break;
+            } else {
+                /* everything matches - just increment the cnt */
+                range->cnt++;
             }
-            /* everything matches - just increment the cnt */
-            range->cnt++;
         } else {
             /* need to add it */
             ndreg = OBJ_NEW(orte_regex_node_t);

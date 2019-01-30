@@ -170,35 +170,25 @@ static int nidmap_create(opal_pointer_array_t *pool, char **regex)
         }
         /* is this node name already on our list? */
         found = false;
-        for (item = opal_list_get_first(&nodenms);
-             !found && item != opal_list_get_end(&nodenms);
-             item = opal_list_get_next(item)) {
-            ndreg = (orte_regex_node_t*)item;
-            if (0 < strlen(prefix) && NULL == ndreg->prefix) {
-                continue;
+        if (0 != opal_list_get_size(&nodenms)) {
+            ndreg = (orte_regex_node_t*)opal_list_get_last(&nodenms);
+
+            if ((0 < strlen(prefix) && NULL == ndreg->prefix) ||
+                (0 == strlen(prefix) && NULL != ndreg->prefix) ||
+                (0 < strlen(prefix) && NULL != ndreg->prefix &&
+                    0 != strcmp(prefix, ndreg->prefix)) ||
+                (NULL == suffix && NULL != ndreg->suffix) ||
+                (NULL != suffix && NULL == ndreg->suffix) ||
+                (NULL != suffix && NULL != ndreg->suffix &&
+                    0 != strcmp(suffix, ndreg->suffix)) ||
+                (numdigits != ndreg->num_digits)) {
+                found = false;
+            } else {
+                /* found a match - flag it */
+                found = true;
             }
-            if (0 == strlen(prefix) && NULL != ndreg->prefix) {
-                continue;
-            }
-            if (0 < strlen(prefix) && NULL != ndreg->prefix
-                && 0 != strcmp(prefix, ndreg->prefix)) {
-                continue;
-            }
-            if (NULL == suffix && NULL != ndreg->suffix) {
-                continue;
-            }
-            if (NULL != suffix && NULL == ndreg->suffix) {
-                continue;
-            }
-            if (NULL != suffix && NULL != ndreg->suffix &&
-                0 != strcmp(suffix, ndreg->suffix)) {
-                continue;
-            }
-            if (numdigits != ndreg->num_digits) {
-                continue;
-            }
-            /* found a match - flag it */
-            found = true;
+        }
+        if (found) {
             /* get the last range on this nodeid - we do this
              * to preserve order
              */
@@ -222,9 +212,7 @@ static int nidmap_create(opal_pointer_array_t *pool, char **regex)
             }
             /* everything matches - just increment the cnt */
             range->cnt++;
-            break;
-        }
-        if (!found) {
+        } else {
             /* need to add it */
             ndreg = OBJ_NEW(orte_regex_node_t);
             if (0 < strlen(prefix)) {

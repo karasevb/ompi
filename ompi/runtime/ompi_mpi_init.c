@@ -371,6 +371,15 @@ static void fence_release(int status, void *cbdata)
     OPAL_POST_OBJECT(active);
 }
 
+#include <time.h>
+
+inline static double get_time_nsec()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (ts.tv_sec + 1E-9 * ts.tv_nsec);
+}
+            
 int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
                   bool reinit_ok)
 {
@@ -689,6 +698,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
      * If we do not have a non-blocking fence, then we must always
      * execute the blocking fence as the system does not support
      * later data retrieval. */
+    opal_output(0, "mpi/modex_start %lf", get_time_nsec());
     if (NULL != opal_pmix.fence_nb) {
         if (opal_pmix_base_async_modex && opal_pmix_collect_all_data) {
             /* execute the fence_nb in the background to collect
@@ -723,6 +733,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
             goto error;
         }
     }
+    opal_output(0, "mpi/modex_end %lf", get_time_nsec());
 
     OMPI_TIMING_NEXT("modex");
 
@@ -887,6 +898,8 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
     /* Next timing measurement */
     OMPI_TIMING_NEXT("modex-barrier");
 
+    opal_output(0, "mpi/barrier_start %lf", get_time_nsec());
+
     /* if we executed the above fence in the background, then
      * we have to wait here for it to complete. However, there
      * is no reason to do two barriers! */
@@ -912,6 +925,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
             }
         }
     }
+    opal_output(0, "mpi/barrier_end %lf", get_time_nsec());
 
     /* check for timing request - get stop time and report elapsed
        time if so, then start the clock again */

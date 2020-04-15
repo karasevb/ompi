@@ -624,15 +624,16 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
        so they are not opened here. */
 
     /* Select which MPI components to use */
-
+    OMPI_TIMING_IMPORT_OPAL("orte_init");
+    
     if (OMPI_SUCCESS !=
         (ret = mca_pml_base_select(OPAL_ENABLE_PROGRESS_THREADS,
                                    ompi_mpi_thread_multiple))) {
         error = "mca_pml_base_select() failed";
         goto error;
     }
+    OMPI_TIMING_NEXT("mca_pml_base_select");        
 
-    OMPI_TIMING_IMPORT_OPAL("orte_init");
     OMPI_TIMING_NEXT("rte_init-commit");
 
     /* exchange connection info - this function may also act as a barrier
@@ -836,6 +837,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
             goto error;
         }
     }
+    OMPI_TIMING_NEXT("modex-pml-enable");
     ret = MCA_PML_CALL(add_procs(procs, nprocs));
     free(procs);
     /* If we got "unreachable", then print a specific error message.
@@ -850,6 +852,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
         error = "PML add procs failed";
         goto error;
     }
+    OMPI_TIMING_NEXT("modex-add_procs");
 
     MCA_PML_CALL(add_comm(&ompi_mpi_comm_world.comm));
     MCA_PML_CALL(add_comm(&ompi_mpi_comm_self.comm));
